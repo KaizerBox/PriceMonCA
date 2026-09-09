@@ -5,7 +5,7 @@ import (
     "fmt"
     "sync"
 
-    "pricemon/internal/domain"
+    "PriceMonCA/internal/domain"
 )
 
 type UserRepo struct {
