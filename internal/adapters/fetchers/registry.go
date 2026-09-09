@@ -5,7 +5,7 @@ import (
     "fmt"
     "sync"
 
-    "pricemon/internal/domain"
+    "PriceMonCA/internal/domain"
 )
 
 // Fetcher is the interface every site adapter implements.
