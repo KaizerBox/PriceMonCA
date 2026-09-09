@@ -1,0 +1,32 @@
+//YAML
+logLevel: info
+
+http:
+  listenAddr: ":8080"
+  timeout: 15s
+  rps: 2
+  burst: 4
+  userAgent: "pricemon/1.0 (+https://example.com/bot)"
+  maxTries: 3
+
+scheduler:
+  defaultSpec: "@every 10m"
+
+sites:
+  bestbuy:
+    bestbuy:
+      scheme: https
+      host: www.bestbuy.ca
+      productPath: "/api/v2/json/product/%s"
+      locationsPath: "/api/v3/json/locations"
+      availabilityPath: "/ecomm-api/availability/products"
+      language: en-CA
+      availabilityQuery:
+        accept: "application/vnd.bestbuy.standardproduct.v1+json"
+        accept-language: "en-CA"
+
+notifiers:
+  gmail:
+    credentialPath: "./secrets/credentials.json"
+    tokenPath: "./secrets/token.json"
+    from: "you@example.com"
