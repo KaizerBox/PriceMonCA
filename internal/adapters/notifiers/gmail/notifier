@@ -1,0 +1,103 @@
+package gmail
+
+import (
+    "context"
+    "encoding/base64"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "log/slog"
+    "os"
+
+    "golang.org/x/oauth2"
+    "golang.org/x/oauth2/google"
+    "google.golang.org/api/gmail/v1"
+    "google.golang.org/api/option"
+
+    "PriceMonCA/internal/domain"
+)
+
+type Config struct {
+    CredentialPath string `yaml:"credentialPath"`
+    TokenPath      string `yaml:"tokenPath"`
+    From           string `yaml:"from"`
+}
+
+func (c Config) withDefaults() Config {
+    if c.CredentialPath == "" {
+        c.CredentialPath = "credentials.json"
+    }
+    if c.TokenPath == "" {
+        c.TokenPath = "token.json"
+    }
+    return c
+}
+
+type Notifier struct {
+    svc  *gmail.Service
+    from string
+    log  *slog.Logger
+}
+
+func New(ctx context.Context, cfg Config, log *slog.Logger) (*Notifier, error) {
+    cfg = cfg.withDefaults()
+    if cfg.From == "" {
+        return nil, fmt.Errorf("%w: gmail 'from' is required", domain.ErrInvalidInput)
+    }
+
+    secret, err := os.ReadFile(cfg.CredentialPath)
+    if err != nil {
+        return nil, fmt.Errorf("gmail: read credentials: %w", err)
+    }
+    // Bug fix: was GmailReadonlyScope while trying to send mail.
+    oauthCfg, err := google.ConfigFromJSON(secret, gmail.GmailSendScope)
+    if err != nil {
+        return nil, fmt.Errorf("gmail: parse credentials: %w", err)
+    }
+
+    tok, err := tokenFromFile(cfg.TokenPath)
+    if err != nil {
+        return nil, fmt.Errorf("gmail: token missing at %s (run auth flow separately): %w", cfg.TokenPath, err)
+    }
+    httpClient := oauthCfg.Client(ctx, tok)
+
+    svc, err := gmail.NewService(ctx, option.WithHTTPClient(httpClient))
+    if err != nil {
+        return nil, fmt.Errorf("gmail: init service: %w", err)
+    }
+    return &Notifier{svc: svc, from: cfg.From, log: log.With("notifier", "gmail")}, nil
+}
+
+func (n *Notifier) Channel() string { return "email" }
+
+func (n *Notifier) Notify(ctx context.Context, target domain.NotificationTarget, e domain.Event) error {
+    if target.Address == "" {
+        return fmt.Errorf("%w: empty email address", domain.ErrInvalidInput)
+    }
+    raw := fmt.Sprintf(
+        "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
+        n.from, target.Address, e.Subject, e.Body,
+    )
+    msg := &gmail.Message{Raw: base64.URLEncoding.EncodeToString([]byte(raw))}
+    if _, err := n.svc.Users.Messages.Send("me", msg).Context(ctx).Do(); err != nil {
+        return fmt.Errorf("gmail: send: %w", err)
+    }
+    n.log.Info("email sent", "to", target.Address, "subject", e.Subject)
+    return nil
+}
+
+func tokenFromFile(path string) (*oauth2.Token, error) {
+    f, err := os.Open(path)
+    if err != nil {
+        return nil, err
+    }
+    defer f.Close()
+    tok := &oauth2.Token{}
+    if err := json.NewDecoder(f).Decode(tok); err != nil {
+        return nil, err
+    }
+    if !tok.Valid() && tok.RefreshToken == "" {
+        return nil, errors.New("token invalid and no refresh token")
+    }
+    return tok, nil
+}
